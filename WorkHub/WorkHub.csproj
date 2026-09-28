@@ -9,12 +9,28 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>WorkHub</AssemblyName>
     <RootNamespace>WorkHub</RootNamespace>
-    <!-- Single-file friendly, but normal build is fine too -->
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+    <!-- Single self-contained exe: `dotnet publish -c Release` needs no extra flags. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
+    <!-- No debug symbols in output. -->
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- OpenVINO sidecar script: shipped inside the single-file exe, written out at run time. -->
+    <None Remove="ov_whisper.py" />
+    <EmbeddedResource Include="ov_whisper.py" LogicalName="WorkHub.ov_whisper.py" />
   </ItemGroup>
 
 </Project>

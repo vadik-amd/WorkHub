@@ -36,13 +36,46 @@ public static class WhisperInstaller
         _ => "",
     };
 
-    /// <summary>Full setup: portable binary (GitHub) + ggml model (Hugging Face).</summary>
+    /// <summary>Full setup: portable binary (GitHub) + ggml model + VAD model (Hugging Face).</summary>
     public static async Task InstallAsync(
         AppSettings settings, string modelName, Action<string> log, CancellationToken ct)
     {
         await EnsureBinaryAsync(settings, log, ct);
         await EnsureModelAsync(settings, modelName, log, ct);
+        await EnsureVadModelAsync(settings, log, ct);
         log("Готово. Портативный Whisper настроен.");
+    }
+
+    // Silero VAD model used to skip non-speech regions (kills silence hallucinations).
+    private const string VadModelFileName = "ggml-silero-v5.1.2.bin";
+    private const string VadModelUrl =
+        "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin?download=true";
+
+    /// <summary>Downloads the ~0.9 MB silero VAD model if missing; never fatal to setup.</summary>
+    public static async Task EnsureVadModelAsync(AppSettings settings, Action<string> log, CancellationToken ct)
+    {
+        Directory.CreateDirectory(ToolsDir);
+        string vadFile = Path.Combine(ToolsDir, VadModelFileName);
+        if (!File.Exists(vadFile))
+        {
+            try
+            {
+                await DownloadFileAsync(VadModelUrl, vadFile, "VAD-модель (~0.9 МБ)", log, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // VAD is an enhancement, not a requirement — transcription still works without it.
+                log($"VAD-модель скачать не удалось ({ex.Message}). Расшифровка будет работать и без неё.");
+                return;
+            }
+        }
+        else
+        {
+            log("VAD-модель уже загружена.");
+        }
+
+        settings.WhisperVadModel = vadFile;
+        settings.Save();
     }
 
     /// <summary>Downloads/extracts the whisper.cpp x64 binary (from GitHub) if not present.</summary>
