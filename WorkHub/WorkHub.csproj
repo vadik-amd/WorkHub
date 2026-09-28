@@ -2,7 +2,11 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- Windows 10 TFM (not plain net10.0-windows): it turns on the WinRT projections, which
+         is how Windows.Media.Ocr is reached for the screen-text feature. 17763 is the oldest
+         SDK ref pack that still carries the OCR API, so nothing new is downloaded. -->
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWindowsForms>true</UseWindowsForms>
@@ -28,9 +32,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- OpenVINO sidecar script: shipped inside the single-file exe, written out at run time. -->
+    <!-- OpenVINO sidecar scripts: shipped inside the single-file exe, written out at run time. -->
     <None Remove="ov_whisper.py" />
     <EmbeddedResource Include="ov_whisper.py" LogicalName="WorkHub.ov_whisper.py" />
+    <None Remove="ov_screen_vlm.py" />
+    <EmbeddedResource Include="ov_screen_vlm.py" LogicalName="WorkHub.ov_screen_vlm.py" />
   </ItemGroup>
 
 </Project>

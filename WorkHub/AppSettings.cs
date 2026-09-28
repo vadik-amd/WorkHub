@@ -46,6 +46,59 @@ public sealed class AppSettings
     public string ScreenVideoBitrate { get; set; } = "4M";
     public string ScreenEncoder { get; set; } = "h264_mf"; // hardware (Media Foundation); CPU-light
 
+    // --- Screen text: what was on screen during the call, as a timeline ---
+    // The shared screen arrives here as video pixels inside the meeting window, so this is
+    // pure vision: key frames out of the MP4, then OCR. Modes:
+    //   "off"            — nothing
+    //   "ocr"            — key frames → Windows OCR → deduplicated timeline (.screen.txt/.json)
+    //   "ocr+keyframes"  — the same, and the key frames are kept as JPEGs for a multimodal
+    //                      model (Claude) to look at — it describes the UI better than any
+    //                      local VLM and costs no gigabytes
+    //   "vlm"            — plus a local OpenVINO VLM sidecar describing each frame (needs an
+    //                      IR model put in place by hand; degrades to "ocr" when absent)
+    public string ScreenUnderstanding { get; set; } = "off"; // off | ocr | ocr+keyframes | vlm
+
+    /// <summary>Run the extraction automatically once a call's screen video is finished.</summary>
+    public bool ScreenTextAfterCall { get; set; } = false;
+
+    // OCR languages to try per frame, best result wins (see ScreenTextExtractor). The engine
+    // matters a lot: the English recognizer turns Cyrillic into noise and vice versa, so a
+    // mixed ru/en meeting needs both. Empty = every language installed on this Windows.
+    public List<string> ScreenOcrLanguages { get; set; } = new() { "ru", "en" };
+
+    // Key-frame selection. Sample the video down to ScreenSampleFps first (a shared screen is
+    // nearly static), then keep a frame when it differs from the previous one by more than
+    // ScreenSceneThreshold. NOTE the threshold is small on purpose: measured on real slide
+    // changes, ffmpeg's scene score is ~0.03–0.06 — the widely quoted 0.3 only fires on a
+    // wholesale change of picture (camera → demo) and would miss slide after slide.
+    public double ScreenSceneThreshold { get; set; } = 0.02;
+    public double ScreenSampleFps { get; set; } = 1.0;
+    public int ScreenMinSecondsBetweenFrames { get; set; } = 5;   // floor between kept frames
+    public int ScreenMaxKeyFrames { get; set; } = 400;            // cap for very long calls
+    public double ScreenOcrUpscale { get; set; } = 1.0;           // >1 helps small UI text
+    public int ScreenKeyFrameMaxWidth { get; set; } = 1600;       // kept JPEGs are downscaled to this
+
+    // Local VLM layer (optional, off unless ScreenUnderstanding = "vlm"). Weights live on
+    // huggingface.co, which is blocked here — so nothing is downloaded: export an IR model
+    // elsewhere (optimum-cli export openvino …), drop the folder in, point this at it.
+    public string ScreenVlmModelDir { get; set; } = "";
+    public string ScreenVlmDevice { get; set; } = "AUTO";         // AUTO = NPU → GPU → CPU
+    public int ScreenVlmMaxTokens { get; set; } = 160;
+    public string ScreenVlmPrompt { get; set; } =
+        "Describe this screenshot for meeting notes: which application or site is shown, " +
+        "what the user is doing, and the key on-screen content. Be concise and factual.";
+
+    public ScreenMode ScreenModeParsed() => ScreenUnderstanding?.ToLowerInvariant() switch
+    {
+        "ocr" => ScreenMode.Ocr,
+        "ocr+keyframes" => ScreenMode.OcrKeyFrames,
+        "vlm" => ScreenMode.Vlm,
+        _ => ScreenMode.Off,
+    };
+
+    /// <summary>Key frames are written out for a multimodal model in these modes.</summary>
+    public bool ScreenKeepKeyFrames() => ScreenModeParsed() is ScreenMode.OcrKeyFrames or ScreenMode.Vlm;
+
     // Portable whisper.cpp engine (no Python / no ffmpeg). Populated by the built-in setup.
     public string WhisperCppExe { get; set; } = "";
     public string WhisperCppModel { get; set; } = "";

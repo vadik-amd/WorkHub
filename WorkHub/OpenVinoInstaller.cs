@@ -260,33 +260,37 @@ public static class OpenVinoInstaller
     }
 
     private static readonly object ScriptGate = new();
-    private static bool _scriptWritten;
+    private static readonly HashSet<string> WrittenScripts = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Writes the embedded sidecar script next to the venv (refreshing it after hub updates).
     /// Once per hub session and under a lock: several devices start sidecars at the same moment.
     /// </summary>
-    public static string EnsureScript()
+    public static string EnsureScript() => EnsureScript("ov_whisper.py");
+
+    /// <summary>Same, for another embedded sidecar (e.g. the screen VLM).</summary>
+    public static string EnsureScript(string fileName)
     {
         lock (ScriptGate)
         {
-            if (_scriptWritten && File.Exists(ScriptPath)) return ScriptPath;
+            string path = Path.Combine(ToolsDir, fileName);
+            if (WrittenScripts.Contains(fileName) && File.Exists(path)) return path;
 
-            using var res = typeof(OpenVinoInstaller).Assembly.GetManifestResourceStream("WorkHub.ov_whisper.py")
-                            ?? throw new Exception("В сборке нет ресурса ov_whisper.py.");
+            using var res = typeof(OpenVinoInstaller).Assembly.GetManifestResourceStream("WorkHub." + fileName)
+                            ?? throw new Exception($"В сборке нет ресурса {fileName}.");
             using var reader = new StreamReader(res, Encoding.UTF8);
             string script = reader.ReadToEnd();
 
             Directory.CreateDirectory(ToolsDir);
-            if (!File.Exists(ScriptPath) || File.ReadAllText(ScriptPath, Encoding.UTF8) != script)
+            if (!File.Exists(path) || File.ReadAllText(path, Encoding.UTF8) != script)
             {
                 // Write aside and swap in, so a python that is reading the old copy isn't disturbed.
-                string tmp = ScriptPath + ".new";
+                string tmp = path + ".new";
                 File.WriteAllText(tmp, script, new UTF8Encoding(false));
-                File.Move(tmp, ScriptPath, overwrite: true);
+                File.Move(tmp, path, overwrite: true);
             }
-            _scriptWritten = true;
-            return ScriptPath;
+            WrittenScripts.Add(fileName);
+            return path;
         }
     }
 

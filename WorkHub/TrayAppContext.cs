@@ -18,6 +18,7 @@ public sealed class TrayAppContext : ApplicationContext
 
     private readonly AppSettings _settings;
     private readonly TranscriptionController _transcription;
+    private readonly ScreenTextController _screenText;
     private readonly GpAutoReconnect _gp;
 
     private ToolStripMenuItem _gpEnableItem = null!;
@@ -79,6 +80,14 @@ public sealed class TrayAppContext : ApplicationContext
             RunOnUi);
         var transcribeMenu = _transcription.BuildMenu();
 
+        // --- Screen text: OCR over the recorded screen video (the shared screen is pixels only) ---
+        _screenText = new ScreenTextController(_settings,
+            () => _recorder.OutputFolder,
+            (ms, text, icon) => _tray.ShowBalloonTip(ms, "Текст с экрана", text, icon),
+            text => _tray.Text = text ?? (_recorder.IsRecording ? "Work Hub — запись…" : "Work Hub — ожидание"),
+            RunOnUi);
+        var screenTextMenu = _screenText.BuildMenu();
+
         // --- Program auto-launch submenu ---
         var launchConfigItem = new ToolStripMenuItem("Настроить список…", null, (_, _) => OpenLaunchManager());
         var launchNowItem = new ToolStripMenuItem("Запустить программы сейчас", null, (_, _) => LaunchNow());
@@ -107,6 +116,7 @@ public sealed class TrayAppContext : ApplicationContext
             launchMenu,
             gpMenu,
             transcribeMenu,
+            screenTextMenu,
             openFolderItem,
             new ToolStripSeparator(),
             _autoItem,
@@ -134,6 +144,9 @@ public sealed class TrayAppContext : ApplicationContext
         _gp.Notify += (title, msg, warn) => RunOnUi(() =>
             _tray.ShowBalloonTip(5000, title, msg, warn ? ToolTipIcon.Warning : ToolTipIcon.Info));
 
+        // Keep the autostart entry pointing at this exe (the publish folder moves when the
+        // target framework changes), then reflect its state in the menu.
+        StartupManager.RefreshPathIfEnabled();
         _startupItem.Checked = StartupManager.IsEnabled();
 
         // Auto-detect enabled by default so calls are captured hands-free.
@@ -294,8 +307,20 @@ public sealed class TrayAppContext : ApplicationContext
         _settings.RecordScreen = true;
         _settings.Save();
         _screenItem.Checked = true;
-        _tray.ShowBalloonTip(3000, "Запись экрана",
-            "Включено. Экран будет писаться вместе с созвоном (основной монитор).", ToolTipIcon.Info);
+
+        // If a call is already being recorded, start the screen capture right now instead
+        // of waiting for the next recording to begin.
+        if (_recorder.IsRecording && _recorder.CurrentFilePath != null)
+        {
+            StartScreenIfEnabled(_recorder.CurrentFilePath);
+            _tray.ShowBalloonTip(3000, "Запись экрана",
+                "Включено. Захват экрана начат для текущего созвона (основной монитор).", ToolTipIcon.Info);
+        }
+        else
+        {
+            _tray.ShowBalloonTip(3000, "Запись экрана",
+                "Включено. Экран будет писаться вместе с созвоном (основной монитор).", ToolTipIcon.Info);
+        }
     }
 
     private void OnRecordingState(bool recording, string file)
@@ -353,6 +378,11 @@ public sealed class TrayAppContext : ApplicationContext
                     _tray.ShowBalloonTip(3000, "Запись экрана",
                         "Видео сохранено:\n" + Path.GetFileName(mp4), ToolTipIcon.Info);
             });
+
+            // Optionally read the screen right away, while nothing else is running.
+            if (mp4 != null && _settings.ScreenTextAfterCall &&
+                _settings.ScreenModeParsed() != ScreenMode.Off)
+                await _screenText.RunAsync(new[] { mp4 });
         });
     }
 
@@ -360,6 +390,7 @@ public sealed class TrayAppContext : ApplicationContext
     {
         try { _monitor.Disable(); } catch { }
         try { _monitor.Dispose(); } catch { }
+        try { _screenText.Stop(); } catch { }
         try { _gp.Dispose(); } catch { }
         try { _recorder.Dispose(); } catch { }
         try { if (_screen.IsRecording) _screen.StopAsync().GetAwaiter().GetResult(); } catch { }
