@@ -84,9 +84,14 @@ public sealed class AppSettings
     public string ScreenVlmModelDir { get; set; } = "";
     public string ScreenVlmDevice { get; set; } = "AUTO";         // AUTO = NPU → GPU → CPU
     public int ScreenVlmMaxTokens { get; set; } = 160;
+    // Small VLMs invent content when they can't read a screen (especially a non-English one),
+    // so the prompt asks for the visible layout and says plainly that guessing is not wanted —
+    // the text itself comes from OCR, which is accurate, and doesn't need the model's help.
     public string ScreenVlmPrompt { get; set; } =
-        "Describe this screenshot for meeting notes: which application or site is shown, " +
-        "what the user is doing, and the key on-screen content. Be concise and factual.";
+        "Describe this screenshot for meeting notes: which application or website is shown, " +
+        "and how the screen is laid out. Describe only what is actually visible. " +
+        "Do not guess, do not invent details, and do not translate or interpret text you " +
+        "cannot read clearly — say so instead. Be concise and factual.";
 
     public ScreenMode ScreenModeParsed() => ScreenUnderstanding?.ToLowerInvariant() switch
     {

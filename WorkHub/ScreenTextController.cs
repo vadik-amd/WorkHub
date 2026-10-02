@@ -155,7 +155,22 @@ public sealed class ScreenTextController
                 ? "Готова: " + Path.GetFileName(_settings.ScreenVlmModelDir)
                 : "Не готова — " + why) { Enabled = false });
         menu.DropDownItems.Add(new ToolStripSeparator());
-        menu.DropDownItems.Add(new ToolStripMenuItem("Указать папку модели (OpenVINO IR)…", null,
+        menu.DropDownItems.Add(new ToolStripMenuItem("Скачать модель…", null, (_, _) => OpenVlmSetup()));
+
+        // The models themselves, so a downloaded one can be switched to without the window.
+        foreach (var (repo, label) in OpenVinoInstaller.KnownVlmModels)
+        {
+            string dir = OpenVinoInstaller.VlmModelDirFor(repo);
+            bool downloaded = OpenVinoInstaller.IsVlmModelDownloaded(repo);
+            var item = new ToolStripMenuItem(label + (downloaded ? "" : "  — скачать"), null,
+                (_, _) => SelectVlmModel(repo))
+            {
+                Checked = ModelCatalog.SamePath(_settings.ScreenVlmModelDir, dir),
+            };
+            menu.DropDownItems.Add(item);
+        }
+        menu.DropDownItems.Add(new ToolStripSeparator());
+        menu.DropDownItems.Add(new ToolStripMenuItem("Указать свою папку модели (OpenVINO IR)…", null,
             (_, _) => PickVlmModel()));
 
         var deviceMenu = new ToolStripMenuItem("Устройство");
@@ -169,9 +184,26 @@ public sealed class ScreenTextController
             deviceMenu.DropDownItems.Add(item);
         }
         menu.DropDownItems.Add(deviceMenu);
-        menu.DropDownItems.Add(new ToolStripMenuItem(
-            "Веса не скачиваются: huggingface заблокирован. Экспортируйте IR там, где он доступен\n" +
-            "(optimum-cli export openvino …), положите папку и укажите её здесь. См. README.") { Enabled = false });
+    }
+
+    /// <summary>The model window: pick one from the list and download it, no Python needed.</summary>
+    private void OpenVlmSetup()
+    {
+        using var form = new ScreenVlmSetupForm(_settings) { TopMost = true };
+        form.ShowDialog();
+    }
+
+    /// <summary>Switches to one of the ready-made models, downloading it first if needed.</summary>
+    private void SelectVlmModel(string repo)
+    {
+        if (!OpenVinoInstaller.IsVlmModelDownloaded(repo))
+        {
+            OpenVlmSetup();
+            return;
+        }
+        _settings.ScreenVlmModelDir = OpenVinoInstaller.VlmModelDirFor(repo);
+        _settings.Save();
+        _balloon(3000, "Модель выбрана: " + Path.GetFileName(_settings.ScreenVlmModelDir), ToolTipIcon.Info);
     }
 
     private void PickVlmModel()
@@ -200,9 +232,15 @@ public sealed class ScreenTextController
         _settings.Save();
         UpdateModeChecks();
 
-        if (mode == "vlm" && ScreenVlmEngine.Unavailable(_settings) is { } why)
-            _balloon(6000, "VLM-слой пока не активен — " + why + ".\nБудет работать только OCR.",
-                ToolTipIcon.Warning);
+        // Choosing the VLM mode without a model is pointless — offer to fetch one right away.
+        if (mode == "vlm" && ScreenVlmEngine.Unavailable(_settings) != null)
+        {
+            var answer = MessageBox.Show(
+                "Для этого режима нужна локальная VLM-модель (готовая, ~0.8–3 ГБ).\n\n" +
+                "Скачать её сейчас? Без модели будет работать только OCR.",
+                "Текст с экрана", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer == DialogResult.Yes) OpenVlmSetup();
+        }
         else if (mode != "off")
             _balloon(3000, "Режим: " + mode + ". Запускается из этого же подменю или сразу после созвона.",
                 ToolTipIcon.Info);

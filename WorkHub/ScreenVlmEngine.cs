@@ -55,11 +55,13 @@ public sealed class ScreenVlmEngine : IScreenTextEngine, IAsyncDisposable
     public static string? Unavailable(AppSettings s)
     {
         if (string.IsNullOrWhiteSpace(s.ScreenVlmModelDir))
-            return "модель не задана (Текст с экрана → Локальная VLM-модель…)";
+            return "модель не скачана (Текст с экрана → Локальная VLM-модель → Скачать модель…)";
         if (!Directory.Exists(s.ScreenVlmModelDir))
             return "папки модели нет: " + s.ScreenVlmModelDir;
-        if (!Directory.EnumerateFiles(s.ScreenVlmModelDir, "*.xml").Any())
-            return "в папке модели нет файлов OpenVINO IR (*.xml): " + s.ScreenVlmModelDir;
+        var missing = OpenVinoInstaller.MissingVlmFiles(s.ScreenVlmModelDir);
+        if (missing.Count > 0)
+            return $"в папке модели не хватает файлов ({string.Join(", ", missing.Take(3))}" +
+                   (missing.Count > 3 ? ", …" : "") + "): " + s.ScreenVlmModelDir;
         if (string.IsNullOrWhiteSpace(s.OpenVinoPython) || !File.Exists(s.OpenVinoPython))
             return "не установлен портативный Python OpenVINO (Расшифровка → Установить / настроить OpenVINO…)";
         return null;

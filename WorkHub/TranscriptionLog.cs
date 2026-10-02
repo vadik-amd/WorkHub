@@ -1,22 +1,22 @@
 namespace WorkHub;
 
 /// <summary>
-/// Append-only log of transcription runs (engine output, which OpenVINO device was used,
-/// timings, errors) at %APPDATA%\WorkHub\logs\transcription.log. Rolls over to .old at ~5 MB.
+/// Append-only log file under %APPDATA%\WorkHub\logs. Rolls over to .old at ~5 MB.
+/// Logging must never break the caller, so every failure is swallowed.
 /// </summary>
-public static class TranscriptionLog
+public sealed class FileLog(string fileName)
 {
     private const long MaxBytes = 5_000_000;
-    private static readonly object Gate = new();
+    private readonly object _gate = new();
 
-    public static string FilePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WorkHub", "logs", "transcription.log");
+    public string FilePath { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "WorkHub", "logs", fileName);
 
-    public static void Write(string line)
+    public void Write(string line)
     {
         try
         {
-            lock (Gate)
+            lock (_gate)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
                 var fi = new FileInfo(FilePath);
@@ -25,6 +25,28 @@ public static class TranscriptionLog
                 File.AppendAllText(FilePath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {line}{Environment.NewLine}");
             }
         }
-        catch { /* logging must never break transcription */ }
+        catch { /* ignore */ }
     }
+}
+
+/// <summary>
+/// Log of transcription runs (engine output, which OpenVINO device was used, timings,
+/// errors) at %APPDATA%\WorkHub\logs\transcription.log.
+/// </summary>
+public static class TranscriptionLog
+{
+    private static readonly FileLog Log = new("transcription.log");
+    public static string FilePath => Log.FilePath;
+    public static void Write(string line) => Log.Write(line);
+}
+
+/// <summary>
+/// Log of call recordings (which output devices were captured, which microphone was
+/// picked, devices appearing / disappearing mid-call) at %APPDATA%\WorkHub\logs\recorder.log.
+/// </summary>
+public static class RecorderLog
+{
+    private static readonly FileLog Log = new("recorder.log");
+    public static string FilePath => Log.FilePath;
+    public static void Write(string line) => Log.Write(line);
 }

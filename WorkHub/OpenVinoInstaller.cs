@@ -62,6 +62,69 @@ public static class OpenVinoInstaller
         ("OpenVINO/whisper-medium-int8-ov", "medium int8 (~0.75 ГБ, с пунктуацией, но выдумывает фразы)"),
     };
 
+    /// <summary>Files VLMPipeline needs in an IR model folder (the screen-text VLM layer).</summary>
+    private static readonly string[] RequiredVlmFiles =
+    {
+        "openvino_language_model.xml", "openvino_language_model.bin",
+        "openvino_text_embeddings_model.xml", "openvino_text_embeddings_model.bin",
+        "openvino_vision_embeddings_model.xml", "openvino_vision_embeddings_model.bin",
+        "openvino_tokenizer.xml", "openvino_tokenizer.bin",
+        "openvino_detokenizer.xml", "openvino_detokenizer.bin",
+        "config.json",
+    };
+
+    /// <summary>
+    /// Ready-made vision-language IR models offered for the screen-text VLM layer. Sizes are
+    /// the repos' actual totals; all of them run through the same NPU → GPU → CPU chain.
+    /// </summary>
+    public static readonly (string Repo, string Label)[] KnownVlmModels =
+    {
+        ("OpenVINO/InternVL2-1B-int4-ov", "InternVL2 1B int4 — рекомендуется (~0.8 ГБ, самая быстрая)"),
+        ("OpenVINO/InternVL2-2B-int4-ov", "InternVL2 2B int4 (~1.5 ГБ, заметно точнее описывает экран)"),
+        ("OpenVINO/Phi-3.5-vision-instruct-int4-ov", "Phi-3.5-vision int4 (~2.3 ГБ, хорошо читает интерфейсы)"),
+        ("OpenVINO/InternVL2-4B-int4-ov", "InternVL2 4B int4 (~2.3 ГБ, ещё точнее, медленнее)"),
+        ("OpenVINO/Qwen3-VL-4B-Instruct-int4-ov", "Qwen3-VL 4B int4 (~3 ГБ, самая свежая, требовательная)"),
+    };
+
+    /// <summary>Where a downloaded VLM model lives.</summary>
+    public static string VlmModelDirFor(string repo) => Path.Combine(ModelsDir, repo.Split('/').Last());
+
+    public static List<string> MissingVlmFiles(string? dir)
+    {
+        if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))
+            return RequiredVlmFiles.ToList();
+        return RequiredVlmFiles.Where(f => !File.Exists(Path.Combine(dir, f))).ToList();
+    }
+
+    /// <summary>True when <paramref name="repo"/> is fully downloaded as a VLM model.</summary>
+    public static bool IsVlmModelDownloaded(string repo)
+    {
+        string dir = VlmModelDirFor(repo);
+        return File.Exists(Path.Combine(dir, CompleteMarker)) && MissingVlmFiles(dir).Count == 0;
+    }
+
+    /// <summary>
+    /// Downloads a ready-made VLM model (no conversion, no optimum-cli) and returns its folder.
+    /// Same sources and resume behaviour as the Whisper models.
+    /// </summary>
+    public static async Task<string> EnsureVlmModelAsync(string repo, Action<string> log, CancellationToken ct)
+    {
+        string dir = VlmModelDirFor(repo);
+        if (IsVlmModelDownloaded(repo))
+        {
+            log("Модель уже загружена: " + dir);
+            return dir;
+        }
+
+        await DownloadRepoAsync(repo, dir, log, ct);
+
+        var missing = MissingVlmFiles(dir);
+        if (missing.Count > 0)
+            throw new Exception($"В скачанной модели нет файлов: {string.Join(", ", missing)}. " +
+                                "Похоже, это не VLM-модель для OpenVINO GenAI.");
+        return dir;
+    }
+
     /// <summary>Where the installer keeps a downloaded repo.</summary>
     public static string ModelDirFor(string repo) => Path.Combine(ModelsDir, repo.Split('/').Last());
 
@@ -332,6 +395,17 @@ public static class OpenVinoInstaller
             return;
         }
 
+        await DownloadRepoAsync(repo, dir, log, ct);
+        SetModelDir(settings, dir);
+    }
+
+    /// <summary>
+    /// Downloads every root file of a model repo into <paramref name="dir"/>, taking the first
+    /// source that answers. Files already there with the right size are kept, so an interrupted
+    /// download resumes cheaply. Used for both the Whisper and the VLM models.
+    /// </summary>
+    public static async Task DownloadRepoAsync(string repo, string dir, Action<string> log, CancellationToken ct)
+    {
         Directory.CreateDirectory(dir);
         var errors = new List<string>();
         foreach (var src in ModelSources)
@@ -357,7 +431,6 @@ public static class OpenVinoInstaller
                 }
 
                 File.WriteAllText(Path.Combine(dir, CompleteMarker), $"{src.Name} {repo} {DateTime.Now:s}");
-                SetModelDir(settings, dir);
                 log("Модель загружена: " + dir);
                 return;
             }
